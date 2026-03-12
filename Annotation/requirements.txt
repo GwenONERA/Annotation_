@@ -1,0 +1,16 @@
+# Core
+boto3
+pandas
+openpyxl
+
+# Comparaison / visualisation
+scikit-learn
+matplotlib
+seaborn
+numpy
+
+# Supervision manuelle (notebook)
+ipywidgets
+
+# HuggingFace provider
+openai

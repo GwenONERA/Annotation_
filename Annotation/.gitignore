@@ -1,0 +1,32 @@
+# ── Python ──
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+.eggs/
+*.egg
+
+# ── Outputs temporaires ──
+outputs/*/items/
+tmp_annotations/
+
+# ── Environnement ──
+.env
+.venv/
+venv/²
+env/
+
+# ── IDE ──
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# ── OS ──
+.DS_Store
+Thumbs.db
+
+# ── Jupyter ──
+.ipynb_checkpoints/
