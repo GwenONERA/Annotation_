@@ -99,8 +99,8 @@ def report_predictions(predictions):
         g, p = gold_mat[:, j], pred_mat[:, j]
         acc = accuracy_score(g, p)
         try:
-            kappa = cohen_kappa_score(g, p)
-        except:
+            kappa = cohen_kappa_score(g, p, labels=[0, 1])
+        except Exception:
             kappa = float("nan")
         f1 = f1_score(g, p, zero_division=0)
         prec = precision_score(g, p, zero_division=0)
@@ -298,6 +298,39 @@ def report_diagnostic(diag_records):
     fp_count = sum(1 for v in all_verdicts if v.get("type_divergence") == "faux_positif")
     fn_count = sum(1 for v in all_verdicts if v.get("type_divergence") == "faux_negatif")
     print(f"\n  Faux positifs : {fp_count}  |  Faux négatifs : {fn_count}")
+
+    # ── Exemples de phrases par type d'erreur ──
+    # Index des textes par idx pour lookup rapide
+    text_by_idx = {rec["idx"]: rec.get("text", "") for rec in valid}
+
+    # Grouper les verdicts par type d'erreur
+    examples_by_type = defaultdict(list)
+    for v in all_verdicts:
+        err_type = v.get("type_erreur", "?")
+        examples_by_type[err_type].append(v)
+
+    print(f"\n  {'─' * 70}")
+    print(f"  EXEMPLES PAR TYPE D'ERREUR")
+    print(f"  {'─' * 70}")
+
+    MAX_EXAMPLES = 3
+    for err_type, verdicts_list in sorted(examples_by_type.items(),
+                                          key=lambda x: -len(x[1])):
+        print(f"\n  ▸ {err_type} ({len(verdicts_list)} occurrences) :")
+        shown = 0
+        for v in verdicts_list:
+            if shown >= MAX_EXAMPLES:
+                break
+            idx = v.get("_idx", "?")
+            text = text_by_idx.get(idx, "(texte non disponible)")
+            text_display = text[:80] + ("…" if len(text) > 80 else "")
+            emo = v.get("emotion", "?")
+            div_type = v.get("type_divergence", "?")
+            justif = v.get("justification", "")[:120]
+            raison = v.get("qui_a_raison", "?")
+            print(f"    [{div_type}] {emo} — « {text_display} »")
+            print(f"       → raison: {raison} | {justif}")
+            shown += 1
 
     return {
         "n_valid": len(valid),

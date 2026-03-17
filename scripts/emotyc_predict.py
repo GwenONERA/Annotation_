@@ -131,13 +131,16 @@ def load_model(device=None):
 
 
 def format_input(tokenizer, sentence, prev_sentence=None, next_sentence=None,
-                 use_context=False):
+                 use_context=False, no_template=False):
     """
     Formate l'input selon le meilleur template identifié.
     
+    Sans template          : phrase brute telle quelle
     Sans contexte (défaut) : before:</s>current:{s}</s>after:</s>
     Avec contexte          : before:{prev}</s>current:{s}</s>after:{next}</s>
     """
+    if no_template:
+        return sentence
     eos = tokenizer.eos_token  # </s>
     if use_context:
         prev = prev_sentence or eos
@@ -234,7 +237,7 @@ def compute_metrics(gold, pred):
 
         acc = accuracy_score(g, p)
         try:
-            kappa = cohen_kappa_score(g, p)
+            kappa = cohen_kappa_score(g, p, labels=[0, 1])
         except Exception:
             kappa = float("nan")
         f1 = f1_score(g, p, zero_division=0)
@@ -285,6 +288,8 @@ def parse_args():
                     help="Utiliser les phrases voisines (i-1, i+1) comme contexte")
     p.add_argument("--no-optimized-thresholds", action="store_true",
                     help="Utiliser un seuil fixe de 0.5 au lieu des seuils optimisés")
+    p.add_argument("--no-template", action="store_true",
+                    help="Utiliser la phrase brute sans template bca_v3 (pas de before:/current:/after:)")
     p.add_argument("--batch-size", type=int, default=16,
                     help="Taille du batch pour l'inférence (défaut: 16)")
     p.add_argument("--device", default=None,
@@ -308,15 +313,22 @@ def main():
 
     # ── 3. Préparation des inputs ─────────────────────────────────────
     use_context = args.use_context
+    no_template = args.no_template
     formatted_texts = []
     for i in range(N):
         prev_s = sentences[i - 1] if (i > 0 and use_context) else None
         next_s = sentences[i + 1] if (i < N - 1 and use_context) else None
         formatted_texts.append(
-            format_input(tokenizer, sentences[i], prev_s, next_s, use_context)
+            format_input(tokenizer, sentences[i], prev_s, next_s, use_context,
+                         no_template=no_template)
         )
 
-    template_name = "bca_v3_context" if use_context else "bca_v3_no_context"
+    if no_template:
+        template_name = "raw"
+    elif use_context:
+        template_name = "bca_v3_context"
+    else:
+        template_name = "bca_v3_no_context"
     print(f"▸ Template : {template_name}")
     print(f"  Exemple  : {formatted_texts[0][:120]}…")
 
