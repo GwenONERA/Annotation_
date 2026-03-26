@@ -51,7 +51,8 @@ def load_run(path):
             if not line: continue
             rec = json.loads(line)
             row = {"idx": rec["idx"], "row_id": rec.get("row_id"),
-                   "json_ok": rec.get("json_ok", False)}
+                   "json_ok": rec.get("json_ok", False),
+                   "raw_text": rec.get("raw_text", "{}")}
             pj = rec.get("parsed_json")
             if rec["json_ok"] and isinstance(pj, dict):
                 # Détection de format : SitEmo (nouveau) vs émotions binaires (ancien)
@@ -149,7 +150,8 @@ class SupervisionUI:
             self.emo_parts[e] = parts
             emo_children.append(row_w)
         self.vbox_emos = W.VBox(emo_children)
-        self.html_rat = W.HTML()
+        
+        self.html_sitemo = W.HTML()
         self.txt_notes = W.Textarea(
             placeholder="Notes du réviseur (optionnel)…",
             layout=W.Layout(width="100%", height="50px"))
@@ -176,7 +178,7 @@ class SupervisionUI:
             W.HTML("<hr style='margin:4px 0'>"),
             self.vbox_emos,
             W.HTML("<hr style='margin:4px 0'>"),
-            self.html_rat, self.txt_notes,
+            self.html_sitemo, self.txt_notes,
             W.HBox([self.btn_valid, self.btn_export]),
             self.lbl_status,
         ])
@@ -275,8 +277,7 @@ class SupervisionUI:
         self.lbl_progress.value = (f"<b>{n_rev}/{len(self.filtered)}</b> revus ({pct:.0f}%)")
 
         tag = "✅ revu" if is_rev else "🔶 à revoir"
-        self.lbl_pos.value = (f"<b>Position {self.pos+1}/{len(self.filtered)}</b>"
-                              f" | idx={orig_idx} | {tag}")
+        self.lbl_pos.value = f"<b>idx={orig_idx}</b> | {tag}"
 
         text = str(row.get("TEXT", ""))
         name = str(row.get("NAME", "?"))
@@ -312,15 +313,44 @@ class SupervisionUI:
             wd["r2"].value = self._badge(r2v, c2)
             wd["toggle"].value = int(prev_dec[e]) if e in prev_dec else r1v
 
-        rat1 = row.get("rationale_r1") or ""
-        rat2 = row.get("rationale_r2") or ""
-        conf1 = row.get("confidence_r1") or "?"
-        conf2 = row.get("confidence_r2") or "?"
-        self.html_rat.value = (
-            f"<div style='font-size:12px;background:#f0f0f0;padding:8px;"
-            f"border-radius:6px;line-height:1.6'>"
-            f"<b>Rationale R1</b> (conf: <code>{conf1}</code>): <i>{rat1}</i><br>"
-            f"<b>Rationale R2</b> (conf: <code>{conf2}</code>): <i>{rat2}</i></div>")
+        # ── Parsing SitEmo (raw json) ──
+        def _format_sitemo(raw_str, run_label):
+            html = f"<div style='margin-bottom:8px'><b>{run_label} :</b><ul style='margin-top:4px;padding-left:20px'>"
+            try:
+                content = json.loads(raw_str)
+                # Fallback support for old schema if any
+                if "emotions" in content and "sitemo_units" not in content:
+                    html += f"<li><i>Ancien format binaire détecté (pas de spans SitEmo).</i></li>"
+                    if "rationale_short" in content:
+                        html += f"<li><b>Rationale :</b> <i>{content['rationale_short']}</i></li>"
+                else:
+                    units = content.get('sitemo_units', [])
+                    if not units:
+                        html += "<li><i>Aucune émotion/span détecté.</i></li>"
+                    for unit in units:
+                        span = unit.get('span_text', 'N/A')
+                        mode = unit.get('mode', 'N/A')
+                        cat = unit.get('categorie', 'N/A')
+                        justif = unit.get('justification', 'N/A')
+                        html += (f"<li style='margin-bottom:6px'><b>Span:</b> <code style='background:#e9ecef;padding:2px 4px'>{span}</code><br>"
+                                 f"<b>Catégorie:</b> {cat} | <b>Mode:</b> {mode}<br>"
+                                 f"<b>Justification:</b> <i>{justif}</i></li>")
+            except Exception as e:
+                html += f"<li><i>Erreur de parsing ({e})</i></li>"
+            html += "</ul></div>"
+            return html
+
+        sitemo_r1 = _format_sitemo(str(row.get("raw_text_r1", "{}")), "Output Run 1")
+        sitemo_r2 = _format_sitemo(str(row.get("raw_text_r2", "{}")), "Output Run 2")
+
+        self.html_sitemo.value = (
+            f"<div style='font-size:13px;background:#f8f9fa;padding:12px;"
+            f"border-radius:6px;border:1px solid #dee2e6'>"
+            f"<div style='display:flex;gap:20px;'>"
+            f"<div style='flex:1'>{sitemo_r1}</div>"
+            f"<div style='flex:1'>{sitemo_r2}</div>"
+            f"</div></div>"
+        )
         self.txt_notes.value = prev_dec.get("notes", "")
 
     def _on_validate(self, _):
