@@ -1,6 +1,6 @@
-# Annotation LLM pour des messages de Cyberharcèlement
+# Annotation pour des messages de Cyberharcèlement
 
-Annotation automatisée des émotions dans [ce corpus](https://github.com/aollagnier/CyberAgression-Large) de messages de cyberharcèlement (11-18 ans, français) via différents LLMs.
+Annotation des émotions dans [ce corpus](https://github.com/aollagnier/CyberAgression-Large) de messages de cyberharcèlement (11-18 ans, français) via différents LLMs.
 
 ## Architecture
 
@@ -97,6 +97,26 @@ python scripts/compare.py \
     --run1 outputs/homophobie/run001.jsonl \
     --run2 outputs/homophobie/run002.jsonl \
     --xlsx data/homophobie_scenario_julie.xlsx
+```
+
+### 4. EMOTYC
+
+```python
+    python scripts/emotyc_predict.py \
+        --xlsx outputs/homophobie/annotations_validees.xlsx \
+        --out_dir outputs/homophobie/emotyc_eval
+
+    # Sans seuils optimisés (seuil 0.5 pour tout)
+    python scripts/emotyc_predict.py \
+        --xlsx outputs/homophobie/annotations_validees.xlsx \
+        --out_dir outputs/homophobie/emotyc_eval \
+        --no-optimized-thresholds
+
+    # Avec contexte voisin (i-1, i, i+1)
+    python scripts/emotyc_predict.py \
+        --xlsx outputs/homophobie/annotations_validees.xlsx \
+        --out_dir outputs/homophobie/emotyc_eval \
+        --use-context
 ```
 
 ## Gestion des outputs
