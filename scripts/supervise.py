@@ -62,25 +62,16 @@ def load_run(path):
                         pj.get("sitemo_units", []))
                     for e in EMOTIONS:
                         row[e] = int(emo.get(e, 0))
-                    row["confidence"] = None
-                    row["rationale"]  = None
                 elif "emotions" in pj:
                     emo = pj.get("emotions", {})
                     for e in EMOTIONS:
                         row[e] = int(emo.get(e, 0))
-                    row["confidence"] = pj.get("metadata", {}).get(
-                        "confidence")
-                    row["rationale"]  = pj.get("rationale_short")
                 else:
                     for e in EMOTIONS:
                         row[e] = None
-                    row["confidence"] = None
-                    row["rationale"]  = None
             else:
                 for e in EMOTIONS:
                     row[e] = None
-                row["confidence"] = None
-                row["rationale"]  = None
             rows.append(row)
     return pd.DataFrame(rows)
 
