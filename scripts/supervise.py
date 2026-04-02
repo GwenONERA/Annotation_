@@ -4,8 +4,9 @@ Interface de supervision via Argilla (HuggingFace Space).
 Un record Argilla par désaccord de span inter-annotateurs.
 """
 
-import argparse, json, os, sys, copy, webbrowser
+import argparse, json, os, sys, copy, io, webbrowser
 from difflib import SequenceMatcher
+from urllib.request import urlopen
 
 REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 sys.path.insert(0, os.path.join(REPO_ROOT, "src"))
@@ -414,51 +415,10 @@ def push_to_argilla(merged, df_orig, args):
     print(f"Interface Argilla : {url}")
 
 
-# ═══ EXPORT FROM ARGILLA ══════════════════════════════════════════════════
+# ═══ BUILD EXPORT XLSX ═════════════════════════════════════════════════════
 
-def export_from_argilla(merged, df_orig, args):
-    client = connect_argilla(args.api_url, args.api_key, args.proxy)
-
-    try:
-        dataset = client.datasets(name=args.dataset,
-                                  workspace=args.workspace)
-        _ = dataset.id
-    except Exception:
-        print(f"⚠ Dataset '{args.dataset}' non trouvé.")
-        return
-
-    # Collect decisions: (orig_idx, disagreement_index) → decision
-    record_decisions = {}
-    for record in dataset.records:
-        rid = record.id
-        if not rid or "_d" not in rid:
-            continue
-        parts = rid.rsplit("_d", 1)
-        try:
-            orig_idx = int(parts[0])
-            di = int(parts[1])
-        except (ValueError, IndexError):
-            continue
-
-        decision = None
-        correction = None
-        if record.responses:
-            user_resp = record.responses[-1]
-            cats, mode = None, None
-            for resp in user_resp.responses:
-                if resp.question_name == "decision":
-                    decision = resp.value
-                elif resp.question_name == "correction_categories":
-                    cats = resp.value
-                elif resp.question_name == "correction_mode":
-                    mode = resp.value
-            if decision == "Autre" and cats:
-                correction = {"categories": cats,
-                              "mode": mode}
-        record_decisions[(orig_idx, di)] = (
-            decision, correction)
-
-    # Build export rows
+def _build_export_xlsx(merged, df_orig, record_decisions, export_path):
+    """Build validated annotations XLSX from decisions map."""
     rows_out = []
     for i in range(len(merged)):
         row = merged.iloc[i]
@@ -537,15 +497,117 @@ def export_from_argilla(merged, df_orig, args):
     df_out = df_out[
         [c for c in ordered + rest if c in df_out.columns]]
 
-    export_path = args.out_xlsx or os.path.join(
-        os.path.dirname(os.path.abspath(args.run1)),
-        "annotations_validees.xlsx")
-
     df_out.to_excel(export_path, index=False, engine="openpyxl")
 
     n_rev = sum(1 for r in rows_out if r.get("reviewed"))
     print(f"✓ Exporté → {export_path}")
     print(f"  {n_rev}/{len(merged)} messages avec décision")
+
+
+# ═══ EXPORT FROM ARGILLA ══════════════════════════════════════════════════
+
+def export_from_argilla(merged, df_orig, args):
+    client = connect_argilla(args.api_url, args.api_key, args.proxy)
+
+    try:
+        dataset = client.datasets(name=args.dataset,
+                                  workspace=args.workspace)
+        _ = dataset.id
+    except Exception:
+        print(f"⚠ Dataset '{args.dataset}' non trouvé.")
+        return
+
+    # Collect decisions: (orig_idx, disagreement_index) → decision
+    record_decisions = {}
+    for record in dataset.records:
+        rid = record.id
+        if not rid or "_d" not in rid:
+            continue
+        parts = rid.rsplit("_d", 1)
+        try:
+            orig_idx = int(parts[0])
+            di = int(parts[1])
+        except (ValueError, IndexError):
+            continue
+
+        decision = None
+        correction = None
+        if record.responses:
+            cats, mode = None, None
+            for resp in record.responses:
+                if resp.question_name == "decision":
+                    decision = resp.value
+                elif resp.question_name == "correction_categories":
+                    cats = resp.value
+                elif resp.question_name == "correction_mode":
+                    mode = resp.value
+            if decision == "Autre" and cats:
+                correction = {"categories": cats,
+                              "mode": mode}
+        record_decisions[(orig_idx, di)] = (
+            decision, correction)
+
+    export_path = args.out_xlsx or os.path.join(
+        os.path.dirname(os.path.abspath(args.run1)),
+        "annotations_validees.xlsx")
+    _build_export_xlsx(merged, df_orig, record_decisions, export_path)
+
+
+# ═══ EXPORT FROM HUGGINGFACE ══════════════════════════════════════════════
+
+def export_from_hf(merged, df_orig, args):
+    """Export using the HuggingFace parquet pushed from Argilla."""
+    hf_id = args.hf_dataset
+    url = (f"https://huggingface.co/datasets/{hf_id}"
+           f"/resolve/main/data/train-00000-of-00001.parquet")
+    print(f"⬇ Téléchargement depuis {url}...")
+    data = urlopen(url).read()
+    df_hf = pd.read_parquet(io.BytesIO(data))
+    print(f"  {len(df_hf)} records chargés depuis HuggingFace")
+
+    # Build decisions map from HF parquet flat columns
+    record_decisions = {}
+    for _, hf_row in df_hf.iterrows():
+        rid = hf_row.get("id", "")
+        if not rid or "_d" not in str(rid):
+            continue
+        parts = str(rid).rsplit("_d", 1)
+        try:
+            orig_idx = int(parts[0])
+            di = int(parts[1])
+        except (ValueError, IndexError):
+            continue
+
+        decision = None
+        correction = None
+
+        dec_list = hf_row.get("decision.responses")
+        if (isinstance(dec_list, list) and len(dec_list) > 0
+                and dec_list[0] is not None):
+            decision = dec_list[0]
+
+        cats = None
+        cat_list = hf_row.get("correction_categories.responses")
+        if (isinstance(cat_list, list) and len(cat_list) > 0
+                and cat_list[0] is not None):
+            cats = cat_list[0]  # list of category strings
+
+        mode = None
+        mode_list = hf_row.get("correction_mode.responses")
+        if (isinstance(mode_list, list) and len(mode_list) > 0
+                and mode_list[0] is not None):
+            mode = mode_list[0]
+
+        if decision == "Autre" and cats:
+            correction = {"categories": cats, "mode": mode}
+
+        record_decisions[(orig_idx, di)] = (
+            decision, correction)
+
+    export_path = args.out_xlsx or os.path.join(
+        os.path.dirname(os.path.abspath(args.run1)),
+        "annotations_validees.xlsx")
+    _build_export_xlsx(merged, df_orig, record_decisions, export_path)
 
 
 # ═══ PARSE ARGS ════════════════════════════════════════════════════════════
@@ -557,17 +619,21 @@ def parse_args():
     p.add_argument("--run2", required=True, help="JSONL du run 2")
     p.add_argument("--xlsx", default=None,
                    help="XLSX original (pour TEXT/NAME/ROLE)")
-    p.add_argument("--api_url", required=True,
-                   help="URL Argilla")
-    p.add_argument("--api_key", required=True,
-                   help="Clé API Argilla")
+    p.add_argument("--api_url", default=None,
+                   help="URL Argilla (requis sauf export_hf)")
+    p.add_argument("--api_key", default=None,
+                   help="Clé API Argilla (requis sauf export_hf)")
     p.add_argument("--dataset", default="supervision",
                    help="Nom du dataset (défaut: supervision)")
     p.add_argument("--workspace", default="argilla",
                    help="Workspace Argilla (défaut: argilla)")
-    p.add_argument("--mode", choices=["push", "export"],
+    p.add_argument("--mode", choices=["push", "export", "export_hf"],
                    default="push",
-                   help="push = envoyer, export = récupérer")
+                   help="push = envoyer, export = récupérer "
+                        "via API Argilla, export_hf = récupérer "
+                        "via dataset HuggingFace")
+    p.add_argument("--hf_dataset", default=None,
+                   help="ID du dataset HuggingFace ")
     p.add_argument("--force", action="store_true",
                    help="Recréer le dataset s'il existe")
     p.add_argument("--out_xlsx", default=None,
@@ -633,6 +699,11 @@ def main():
         push_to_argilla(merged, df_orig, args)
     elif args.mode == "export":
         export_from_argilla(merged, df_orig, args)
+    elif args.mode == "export_hf":
+        if not args.hf_dataset:
+            print("⚠ --hf_dataset requis pour le mode export_hf")
+            return
+        export_from_hf(merged, df_orig, args)
 
 
 if __name__ == "__main__":
